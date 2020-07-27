@@ -1,11 +1,11 @@
 # -*- coding: utf-8 -*-
 
+import copy
 from datetime import timedelta
-import math
 import openpyxl
 import random
 
-from combo import ERole, MonitorSchedule, gen_monitor_combos
+from combo import ERole, MonitorSchedule, assign_role_maxes, gen_monitor_combos
 import monitors
 
 HEADER_ROW_IDX = 7
@@ -18,22 +18,26 @@ def make_schedule(excel_path):
     wb = openpyxl.load_workbook(excel_path)
     monitor_dict, must_work_at_office_groups = monitors.load_monitors_info(wb)
     ws = wb['latest']
-
+    monitor_schedule_dict, weekdays = load_initial_schedules(ws, monitor_dict)
+    assign_role_maxes(monitor_schedule_dict, MONITOR_ROLES_ALL, len(weekdays))
+    cp_monitor_schedule_dict = copy_monitor_schedule_dict(monitor_schedule_dict)
     is_assigned = False
-    for i in range(100):
-        monitor_schedule_dict, weekdays = load_initial_schedules(ws, monitor_dict)
-        if assign_monitors(monitor_schedule_dict, weekdays):
+    for i in range(1000):
+        if assign_monitors(cp_monitor_schedule_dict, weekdays):
             is_assigned = True
+            monitor_schedule_dict = cp_monitor_schedule_dict
             print(f'{i + 1}: found.')
             break
+        cp_monitor_schedule_dict = copy_monitor_schedule_dict(monitor_schedule_dict)
+
     if not is_assigned:
         print('could not assigned.')
-        monitor_schedule_dict, weekdays = load_initial_schedules(ws, monitor_dict)
         assign_monitors(monitor_schedule_dict, weekdays, True)
 
-    # for mc in gen_monitor_combos(monitor_dict.values()):
-    #     print(f'{mc.monitor_am1.name},{mc.monitor_am2.name},{mc.monitor_pm.name}')
+    debug_schedules(monitor_schedule_dict, weekdays)
 
+
+def debug_schedules(monitor_schedule_dict, weekdays):
     for day in weekdays:
         md = {}
         for ms in monitor_schedule_dict.values():
@@ -43,6 +47,9 @@ def make_schedule(excel_path):
             print(day)
         else:
             print(f'{day}: {md[ERole.AM1].name}, {md[ERole.AM2].name}, {md[ERole.PM].name}')
+    print()
+    for m, ms in monitor_schedule_dict.items():
+        print(f'{m.name},{ms.am1_count},{ms.am2_count},{ms.pm_count},{ms.monitor_count}')
 
 
 def load_initial_schedules(ws, monitor_dict):
@@ -91,22 +98,37 @@ def convert_val_to_role(val):
     return ERole.OTHER
 
 
+def copy_monitor_schedule_dict(monitor_schedule_dict):
+    cp = {}
+    for m, ms in monitor_schedule_dict.items():
+        cp[m] = copy.copy(ms)
+    return cp
+
+
 def assign_monitors(monitor_schedule_dict, weekdays, force_exec=False):
+    """
+    監視当番の割り振りを行う。
+
+    :param monitor_schedule_dict: 監視スケジュールのdict(key:=Monitor, item:=MonitorSchedule)
+    :param weekdays: 営業日のIterable
+    :param force_exec: 均等な割り振りが不可の場合でも、その日を除いて処理を続行する場合はTrueを設定する
+    :return: 割り振りが完了した場合はTrue
+    """
     monitor_set = monitor_schedule_dict.keys()
-    largest_monitoring_days = math.ceil(len(weekdays) / len(monitor_set))
     all_monitor_combos = set(gen_monitor_combos(monitor_set))
     for day in weekdays:
-        filters = create_filters(day, monitor_schedule_dict, largest_monitoring_days)
+        filters = create_filters(day, monitor_schedule_dict)
         # extract monitor combo that meets all filters.
         monitor_combos = [mc for mc in all_monitor_combos if all([f(mc) for f in filters])]
         if not monitor_combos:
-            print(f'{day}: no valid combo.')
-            filters = create_filters(day, monitor_schedule_dict, largest_monitoring_days, False)
+            # print(f'{day}: no valid combo.')
+            filters = create_filters(day, monitor_schedule_dict, False)
             monitor_combos = [mc for mc in all_monitor_combos if all([f(mc) for f in filters])]
             if not monitor_combos:
-                # monitor_combos = all_monitor_combos
                 if not force_exec:
                     return False
+                else:
+                    continue
 
         # Choice a monitor combo at random.
         monitor_combo = random.choice(monitor_combos)
@@ -116,8 +138,7 @@ def assign_monitors(monitor_schedule_dict, weekdays, force_exec=False):
     return True
 
 
-def create_filters(day, monitor_schedule_dict, largest_monitoring_days,
-                   include_pre_day=True):
+def create_filters(day, monitor_schedule_dict, include_pre_day=True):
     filters = []
     for ms in monitor_schedule_dict.values():
         # Manually input day role
@@ -129,11 +150,11 @@ def create_filters(day, monitor_schedule_dict, largest_monitoring_days,
         else:
             # Adjust monitoring days
             filter_roles = []
-            if ms.am1_count >= largest_monitoring_days:
+            if ms.is_role_max(ERole.AM1):
                 filter_roles.append(ERole.AM1)
-            if ms.am2_count >= largest_monitoring_days:
+            if ms.is_role_max(ERole.AM2):
                 filter_roles.append(ERole.AM2)
-            if ms.pm_count >= largest_monitoring_days:
+            if ms.is_role_max(ERole.PM):
                 filter_roles.append(ERole.PM)
             if filter_roles:
                 filters.append(create_filter(ms.monitor, include=False, roles=filter_roles))
@@ -155,7 +176,7 @@ def create_filter(monitor, include=True, roles=None):
 
 
 def main():
-    make_schedule('./schedules/MonitorSchedule2020.xlsm')
+    make_schedule('./schedules/MonitorSchedule2020_test.xlsm')
 
 
 if __name__ == '__main__':
