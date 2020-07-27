@@ -5,6 +5,7 @@ from datetime import timedelta
 import openpyxl
 import random
 import sys
+import time
 
 from combo import ERole, MonitorSchedule, assign_role_maxes, gen_monitor_combos
 import monitors
@@ -25,7 +26,7 @@ def make_schedule(excel_path):
     assign_role_maxes(monitor_schedule_dict, MONITOR_ROLES_ALL, len(weekday_dict))
     cp_monitor_schedule_dict = copy_monitor_schedule_dict(monitor_schedule_dict)
     is_assigned = False
-    for i in range(1000):
+    for i in range(10000):
         if assign_monitors(cp_monitor_schedule_dict, weekdays):
             is_assigned = True
             monitor_schedule_dict = cp_monitor_schedule_dict
@@ -127,14 +128,12 @@ def assign_monitors(monitor_schedule_dict, weekdays, force_exec=False):
         # extract monitor combo that meets all filters.
         monitor_combos = [mc for mc in all_monitor_combos if all([f(mc) for f in filters])]
         if not monitor_combos:
-            # print(f'{day}: no valid combo.')
+            if not force_exec:
+                return False
             filters = create_filters(day, monitor_schedule_dict, False)
             monitor_combos = [mc for mc in all_monitor_combos if all([f(mc) for f in filters])]
             if not monitor_combos:
-                if not force_exec:
-                    return False
-                else:
-                    continue
+                continue
 
         # Choice a monitor combo at random.
         monitor_combo = random.choice(monitor_combos)
@@ -170,6 +169,8 @@ def create_filters(day, monitor_schedule_dict, include_pre_day=True):
             pre_day = day - timedelta(days=1)
             if role := ms.schedule.get(pre_day):
                 if role == ERole.PM:
+                    filters.append(create_filter(ms.monitor, include=False, roles=MONITOR_ROLES_ALL))
+                if role in MONITOR_ROLES_AM:
                     filters.append(create_filter(ms.monitor, include=False, roles=MONITOR_ROLES_AM))
     return filters
 
@@ -196,12 +197,23 @@ def output_schedules(ws, monitor_schedule_dict, weekday_dict):
                     ws.cell(row=row_idx, column=col_idx, value=ms.monitor.name)
 
 
-def main(file_path='MonitorSchedule2020_test.xlsm'):
+def elapsed_time(f):
+    def wrapper(*args, **kwargs):
+        st = time.time()
+        v = f(*args, **kwargs)
+        print(f'{f.__name__}: {time.time() - st}')
+        return v
+
+    return wrapper
+
+
+@elapsed_time
+def main(file_path='./schedules/MonitorSchedule2020_test.xlsm'):
     make_schedule(file_path)
 
 
 if __name__ == '__main__':
-    if len(sys.argv) > 2:
+    if len(sys.argv) > 1:
         main(sys.argv[1])
     else:
         main()
