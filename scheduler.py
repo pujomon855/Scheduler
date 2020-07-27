@@ -4,6 +4,7 @@ import copy
 from datetime import timedelta
 import openpyxl
 import random
+import sys
 
 from combo import ERole, MonitorSchedule, assign_role_maxes, gen_monitor_combos
 import monitors
@@ -195,9 +196,12 @@ def output_schedules(ws, monitor_schedule_dict, weekday_dict):
                     ws.cell(row=row_idx, column=col_idx, value=ms.monitor.name)
 
 
-def main():
-    make_schedule('./schedules/MonitorSchedule2020_test.xlsm')
+def main(file_path='MonitorSchedule2020_test.xlsm'):
+    make_schedule(file_path)
 
 
 if __name__ == '__main__':
-    main()
+    if len(sys.argv) > 2:
+        main(sys.argv[1])
+    else:
+        main()
