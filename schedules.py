@@ -15,11 +15,13 @@ MONITOR_ROLES_AM = {ERole.AM1, ERole.AM2, }
 
 
 def make_schedule(excel_path):
-    wb = openpyxl.load_workbook(excel_path)
+    keep_vba = True if excel_path.endswith('xlsm') else False
+    wb = openpyxl.load_workbook(excel_path, keep_vba=keep_vba)
     monitor_dict, must_work_at_office_groups = monitors.load_monitors_info(wb)
     ws = wb['latest']
-    monitor_schedule_dict, weekdays = load_initial_schedules(ws, monitor_dict)
-    assign_role_maxes(monitor_schedule_dict, MONITOR_ROLES_ALL, len(weekdays))
+    monitor_schedule_dict, weekday_dict = load_initial_schedules(ws, monitor_dict)
+    weekdays = weekday_dict.values()
+    assign_role_maxes(monitor_schedule_dict, MONITOR_ROLES_ALL, len(weekday_dict))
     cp_monitor_schedule_dict = copy_monitor_schedule_dict(monitor_schedule_dict)
     is_assigned = False
     for i in range(1000):
@@ -35,6 +37,8 @@ def make_schedule(excel_path):
         assign_monitors(monitor_schedule_dict, weekdays, True)
 
     debug_schedules(monitor_schedule_dict, weekdays)
+    output_schedules(ws, monitor_schedule_dict, weekday_dict)
+    wb.save(excel_path)
 
 
 def debug_schedules(monitor_schedule_dict, weekdays):
@@ -56,20 +60,21 @@ def load_initial_schedules(ws, monitor_dict):
     monitor_schedule_dict = init_monitor_schedules(ws, monitor_dict)
     num_of_monitors = len(monitor_dict)
     monitor_list = monitor_dict.values()
-    weekdays = []
-    for row in ws.iter_rows(min_row=DATA_START_ROW_IDX, max_col=num_of_monitors + 2):
+    weekday_dict = {}  # key:=row_idx(int), item:=datetime
+    for row_idx, row in enumerate(ws.iter_rows(min_row=DATA_START_ROW_IDX, max_col=num_of_monitors + 2),
+                                  DATA_START_ROW_IDX):
         day = row[0].value
         if not day:
             break
         holiday_cell = row[num_of_monitors + 1]
         if not is_weekday(day, holiday_cell):
             continue
-        weekdays.append(day)
+        weekday_dict[row_idx] = day
         for idx, monitor in enumerate(monitor_list, 1):
             if val := row[idx].value:
                 schedule = monitor_schedule_dict[monitor]
                 schedule.schedule[day] = convert_val_to_role(val)
-    return monitor_schedule_dict, weekdays
+    return monitor_schedule_dict, weekday_dict
 
 
 def init_monitor_schedules(ws, monitor_dict):
@@ -173,6 +178,21 @@ def create_filter(monitor, include=True, roles=None):
         return lambda monitor_combo: monitor_combo.contains_monitor(monitor, roles)
     else:
         return lambda monitor_combo: not monitor_combo.contains_monitor(monitor, roles)
+
+
+def output_schedules(ws, monitor_schedule_dict, weekday_dict):
+    monitor_name_st_col = len(monitor_schedule_dict) + 4
+    monitor_name_cols = {
+        ERole.AM1: monitor_name_st_col,
+        ERole.AM2: monitor_name_st_col + 1,
+        ERole.PM: monitor_name_st_col + 2
+    }
+    for row_idx, day in weekday_dict.items():
+        for ms in monitor_schedule_dict.values():
+            if (role := ms.schedule.get(day)) and role in MONITOR_ROLES_ALL:
+                ws.cell(row=row_idx, column=ms.col_idx, value=role.name)
+                if col_idx := monitor_name_cols.get(role):
+                    ws.cell(row=row_idx, column=col_idx, value=ms.monitor.name)
 
 
 def main():

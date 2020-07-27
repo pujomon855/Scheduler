@@ -1,5 +1,4 @@
 venv
 .idea
-output
-sample/
 schedules/bk
+schedules/MonitorSchedule2020_*
