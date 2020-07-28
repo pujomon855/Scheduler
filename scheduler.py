@@ -1,7 +1,8 @@
 # -*- coding: utf-8 -*-
 
 import copy
-from datetime import timedelta
+from dataclasses import dataclass
+from datetime import datetime, timedelta
 import openpyxl
 import random
 import sys
@@ -16,31 +17,51 @@ MONITOR_ROLES_ALL = {ERole.AM1, ERole.AM2, ERole.PM, }
 MONITOR_ROLES_AM = {ERole.AM1, ERole.AM2, }
 
 
+@dataclass
+class DayPriority:
+    """
+    日付と優先度を持つクラス
+    priorityが小さいほど優先度が高い。
+    """
+    day: datetime
+    priority: int = 0
+
+
 def make_schedule(excel_path):
     keep_vba = True if excel_path.endswith('xlsm') else False
     wb = openpyxl.load_workbook(excel_path, keep_vba=keep_vba)
     monitor_dict, must_work_at_office_groups = monitors.load_monitors_info(wb)
     ws = wb['latest']
     monitor_schedule_dict, weekday_dict = load_initial_schedules(ws, monitor_dict)
-    weekdays = weekday_dict.values()
+    sorted_day_priorities = sorted(weekday_dict.values(), key=lambda dp: dp.priority)
+    weekdays = [dp.day for dp in sorted_day_priorities]
     assign_role_maxes(monitor_schedule_dict, MONITOR_ROLES_ALL, len(weekday_dict))
     cp_monitor_schedule_dict = copy_monitor_schedule_dict(monitor_schedule_dict)
-    is_assigned = False
-    for i in range(10000):
-        if assign_monitors(cp_monitor_schedule_dict, weekdays):
-            is_assigned = True
+    res_monitor_schedule_dict = _try_assign_monitors(
+        monitor_schedule_dict, cp_monitor_schedule_dict, weekdays, 1000)
+    if res_monitor_schedule_dict:
+        monitor_schedule_dict = res_monitor_schedule_dict
+    else:
+        cp_monitor_schedule_dict = _try_assign_monitors(
+            monitor_schedule_dict, cp_monitor_schedule_dict, weekdays, 1000, True)
+        if cp_monitor_schedule_dict:
             monitor_schedule_dict = cp_monitor_schedule_dict
-            print(f'{i + 1}: found.')
-            break
-        cp_monitor_schedule_dict = copy_monitor_schedule_dict(monitor_schedule_dict)
-
-    if not is_assigned:
-        print('could not assigned.')
-        assign_monitors(monitor_schedule_dict, weekdays, True)
+        else:
+            assign_monitors(monitor_schedule_dict, weekdays, True, True)
 
     debug_schedules(monitor_schedule_dict, weekdays)
     output_schedules(ws, monitor_schedule_dict, weekday_dict)
     wb.save(excel_path)
+
+
+def _try_assign_monitors(msd, cp_msd, weekdays, try_cnt, ignore_prev_day=False):
+    for i in range(try_cnt):
+        if assign_monitors(cp_msd, weekdays, ignore_prev_day):
+            print(f'{ignore_prev_day=}: {i + 1}: found.')
+            return cp_msd
+        cp_msd = copy_monitor_schedule_dict(msd)
+    print(f'{ignore_prev_day=}: {try_cnt}: not found.')
+    return None
 
 
 def debug_schedules(monitor_schedule_dict, weekdays):
@@ -59,10 +80,18 @@ def debug_schedules(monitor_schedule_dict, weekdays):
 
 
 def load_initial_schedules(ws, monitor_dict):
+    """
+    指定シートからあらかじめ代入されている予定を読み取り、各監視者のスケジュールを初期化する。
+
+    :param ws: ワークシート
+    :param monitor_dict: 監視者の辞書(key:=name, item:=Monitor)
+    :return: 監視者のスケジュールの辞書(key:=Monitor, item:=MonitorSchedule),
+                日付の辞書(key:=row_idx(int), item:=DayPriority)
+    """
     monitor_schedule_dict = init_monitor_schedules(ws, monitor_dict)
     num_of_monitors = len(monitor_dict)
     monitor_list = monitor_dict.values()
-    weekday_dict = {}  # key:=row_idx(int), item:=datetime
+    weekday_dict = {}
     for row_idx, row in enumerate(ws.iter_rows(min_row=DATA_START_ROW_IDX, max_col=num_of_monitors + 2),
                                   DATA_START_ROW_IDX):
         day = row[0].value
@@ -71,11 +100,19 @@ def load_initial_schedules(ws, monitor_dict):
         holiday_cell = row[num_of_monitors + 1]
         if not is_weekday(day, holiday_cell):
             continue
-        weekday_dict[row_idx] = day
+        day_priority = DayPriority(day)
+        weekday_dict[row_idx] = day_priority
         for idx, monitor in enumerate(monitor_list, 1):
             if val := row[idx].value:
                 schedule = monitor_schedule_dict[monitor]
-                schedule.schedule[day] = convert_val_to_role(val)
+                role = convert_val_to_role(val)
+                schedule.schedule[day] = role
+                if role in MONITOR_ROLES_ALL:
+                    day_priority.priority -= 2
+                else:
+                    day_priority.priority -= 1
+        if day_priority.priority >= 0:
+            day_priority.priority = day.day
     return monitor_schedule_dict, weekday_dict
 
 
@@ -112,12 +149,13 @@ def copy_monitor_schedule_dict(monitor_schedule_dict):
     return cp
 
 
-def assign_monitors(monitor_schedule_dict, weekdays, force_exec=False):
+def assign_monitors(monitor_schedule_dict, weekdays, ignore_prev_day=False, force_exec=False):
     """
     監視当番の割り振りを行う。
 
     :param monitor_schedule_dict: 監視スケジュールのdict(key:=Monitor, item:=MonitorSchedule)
     :param weekdays: 営業日のIterable
+    :param ignore_prev_day: 前日からの連続条件を除外する場合はTrue
     :param force_exec: 均等な割り振りが不可の場合でも、その日を除いて処理を続行する場合はTrueを設定する
     :return: 割り振りが完了した場合はTrue
     """
@@ -128,11 +166,13 @@ def assign_monitors(monitor_schedule_dict, weekdays, force_exec=False):
         # extract monitor combo that meets all filters.
         monitor_combos = [mc for mc in all_monitor_combos if all([f(mc) for f in filters])]
         if not monitor_combos:
-            if not force_exec:
+            if not ignore_prev_day:
                 return False
             filters = create_filters(day, monitor_schedule_dict, False)
             monitor_combos = [mc for mc in all_monitor_combos if all([f(mc) for f in filters])]
             if not monitor_combos:
+                if not force_exec:
+                    return False
                 continue
 
         # Choice a monitor combo at random.
@@ -172,6 +212,11 @@ def create_filters(day, monitor_schedule_dict, include_pre_day=True):
                     filters.append(create_filter(ms.monitor, include=False, roles=MONITOR_ROLES_ALL))
                 if role in MONITOR_ROLES_AM:
                     filters.append(create_filter(ms.monitor, include=False, roles=MONITOR_ROLES_AM))
+
+            next_day = day + timedelta(days=1)
+            if role := ms.schedule.get(next_day):
+                if role in MONITOR_ROLES_AM:
+                    filters.append(create_filter(ms.monitor, include=False, roles=MONITOR_ROLES_ALL))
     return filters
 
 
@@ -189,9 +234,9 @@ def output_schedules(ws, monitor_schedule_dict, weekday_dict):
         ERole.AM2: monitor_name_st_col + 1,
         ERole.PM: monitor_name_st_col + 2
     }
-    for row_idx, day in weekday_dict.items():
+    for row_idx, day_priority in weekday_dict.items():
         for ms in monitor_schedule_dict.values():
-            if (role := ms.schedule.get(day)) and role in MONITOR_ROLES_ALL:
+            if (role := ms.schedule.get(day_priority.day)) and role in MONITOR_ROLES_ALL:
                 ws.cell(row=row_idx, column=ms.col_idx, value=role.name)
                 if col_idx := monitor_name_cols.get(role):
                     ws.cell(row=row_idx, column=col_idx, value=ms.monitor.name)
