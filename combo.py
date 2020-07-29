@@ -184,3 +184,45 @@ def _find_lower_frequency(monitor_schedule_dict, find_num):
     # returns tmp_monitor_set and selected monitors from monitor_set at random
     monitor_set = tmp_monitor_set | set(random.sample(monitor_set, find_num - len(tmp_monitor_set)))
     return monitor_set
+
+
+def assign_remote_max(monitor_schedule_dict, days, max_num_of_remotes_per_day=2):
+    """
+    在宅勤務日数の上限を均等に割り振る。
+
+    :param monitor_schedule_dict: 上限を設定するMonitorScheduleのdict
+    :param days: 割り当て日数
+    :param max_num_of_remotes_per_day: 1日の在宅勤務者の最大人数(default=2)
+    :return: None
+    """
+    man_ass_ms = []
+    not_man_ass_ms = []
+    manual_remote_max = 0
+    for ms in monitor_schedule_dict.values():
+        if remote_max := ms.role_max.get(ERole.R):
+            man_ass_ms.append(ms)
+            manual_remote_max += remote_max
+        else:
+            not_man_ass_ms.append(ms)
+    rem_remote_days = days * max_num_of_remotes_per_day - manual_remote_max
+
+    if rem_remote_days <= 0:
+        _set_remote_max(not_man_ass_ms, 0)
+        return
+
+    num_of_not_man_ass_ms = len(not_man_ass_ms)
+    min_remote_max = int(rem_remote_days / num_of_not_man_ass_ms)
+    num_of_hi_freq_ms = rem_remote_days % num_of_not_man_ass_ms
+    if num_of_hi_freq_ms == 0:
+        _set_remote_max(not_man_ass_ms, min_remote_max)
+        return
+
+    hi_freq_ms_list = random.sample(not_man_ass_ms, num_of_hi_freq_ms)
+    _set_remote_max(hi_freq_ms_list, min_remote_max + 1)
+    lo_freq_ms_list = [ms for ms in not_man_ass_ms if ms not in hi_freq_ms_list]
+    _set_remote_max(lo_freq_ms_list, min_remote_max)
+
+
+def _set_remote_max(monitor_schedules, remote_max):
+    for ms in monitor_schedules:
+        ms.role_max[ERole.R] = remote_max

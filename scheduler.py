@@ -9,11 +9,12 @@ import sys
 import time
 
 from combo import ERole, MonitorSchedule, assign_role_maxes, gen_monitor_combos
-from combo import MONITOR_ROLES_ALL, MONITOR_ROLES_AM
+from combo import MONITOR_ROLES_ALL, MONITOR_ROLES_AM, assign_remote_max
 import monitors
 
 HEADER_ROW_IDX = 7
 DATA_START_ROW_IDX = HEADER_ROW_IDX + 1
+REMOTE_MAX_ROW_IDX = HEADER_ROW_IDX - 1
 
 
 @dataclass
@@ -30,11 +31,14 @@ def make_schedule(excel_path):
     keep_vba = True if excel_path.endswith('xlsm') else False
     wb = openpyxl.load_workbook(excel_path, keep_vba=keep_vba)
     monitor_dict, must_work_at_office_groups = monitors.load_monitors_info(wb)
+
     ws = wb['latest']
     monitor_schedule_dict, weekday_dict = load_initial_schedules(ws, monitor_dict)
     sorted_day_priorities = sorted(weekday_dict.values(), key=lambda dp: dp.priority)
     weekdays = [dp.day for dp in sorted_day_priorities]
-    assign_role_maxes(monitor_schedule_dict, MONITOR_ROLES_ALL, len(weekday_dict))
+    days = len(weekday_dict)
+    assign_role_maxes(monitor_schedule_dict, MONITOR_ROLES_ALL, days)
+
     cp_monitor_schedule_dict = copy_monitor_schedule_dict(monitor_schedule_dict)
     res_monitor_schedule_dict = _try_assign_monitors(
         monitor_schedule_dict, cp_monitor_schedule_dict, weekdays, 1000)
@@ -49,8 +53,13 @@ def make_schedule(excel_path):
             assign_monitors(monitor_schedule_dict, weekdays, True, True)
 
     debug_schedules(monitor_schedule_dict, weekdays)
-    output_schedules(ws, monitor_schedule_dict, weekday_dict)
-    wb.save(excel_path)
+    load_manual_remote_max(ws, monitor_schedule_dict)
+    assign_remote_max(monitor_schedule_dict, days)
+    for m, ms in monitor_schedule_dict.items():
+        print(f'{m.name}\'s {ms.role_max[ERole.R]=}')
+
+    # output_schedules(ws, monitor_schedule_dict, weekday_dict)
+    # wb.save(excel_path)
 
 
 def _try_assign_monitors(msd, cp_msd, weekdays, try_cnt, ignore_prev_day=False):
@@ -224,6 +233,19 @@ def create_filter(monitor, include=True, roles=None):
         return lambda monitor_combo: monitor_combo.contains_monitor(monitor, roles)
     else:
         return lambda monitor_combo: not monitor_combo.contains_monitor(monitor, roles)
+
+
+def load_manual_remote_max(ws, monitor_schedule_dict):
+    """
+    手動で入力された在宅勤務数の上限を読み込み、MonitorScheduleに設定する。
+
+    :param ws: 読み込むシート
+    :param monitor_schedule_dict: 監視スケジュールのdict(key:=Monitor, item:=MonitorSchedule)
+    :return: None
+    """
+    for ms in monitor_schedule_dict.values():
+        if remote_max := ws.cell(row=REMOTE_MAX_ROW_IDX, column=ms.col_idx).value:
+            ms.role_max[ERole.R] = remote_max
 
 
 def output_schedules(ws, monitor_schedule_dict, weekday_dict):
