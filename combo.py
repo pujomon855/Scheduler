@@ -17,6 +17,10 @@ class ERole(Enum):
     OTHER = auto()
 
 
+MONITOR_ROLES_ALL = {ERole.AM1, ERole.AM2, ERole.PM, }
+MONITOR_ROLES_AM = {ERole.AM1, ERole.AM2, }
+
+
 @dataclass(frozen=True)
 class MonitorCombo:
     monitor_am1: Monitor
@@ -79,8 +83,8 @@ class MonitorSchedule:
                     if role in (ERole.AM1, ERole.AM2, ERole.PM)])
 
     @property
-    def max_monitor_count(self):
-        return sum(self.role_max.values())
+    def sum_max_monitor_count(self):
+        return sum([self.role_max.get(r, 0) for r in MONITOR_ROLES_ALL])
 
     def is_role_max(self, role):
         """
@@ -161,20 +165,20 @@ def _find_lower_frequency(monitor_schedule_dict, find_num):
     :param find_num: 検索する監視者数(0 < find_num <= len(monitor_schedule_dict))
     :return: 監視当番数の合計が少ない監視者(Monitor)のset
     """
-    sorted_ms = sorted(monitor_schedule_dict.values(), key=lambda ms: ms.max_monitor_count)
+    sorted_ms = sorted(monitor_schedule_dict.values(), key=lambda ms: ms.sum_max_monitor_count)
     monitor_set = set()
     cur_mon_cnt = 0
     for monitor_schedule in sorted_ms:
-        if find_num <= len(monitor_set) and cur_mon_cnt < monitor_schedule.max_monitor_count:
+        if find_num <= len(monitor_set) and cur_mon_cnt < monitor_schedule.sum_max_monitor_count:
             break
         monitor_set.add(monitor_schedule.monitor)
-        cur_mon_cnt = monitor_schedule.max_monitor_count
+        cur_mon_cnt = monitor_schedule.sum_max_monitor_count
 
     if find_num >= len(monitor_set):
         return monitor_set
 
     # extract monitors whose monitor_count is lower than cur_mon_cnt
-    tmp_monitor_set = {ms.monitor for ms in sorted_ms if ms.max_monitor_count < cur_mon_cnt}
+    tmp_monitor_set = {ms.monitor for ms in sorted_ms if ms.sum_max_monitor_count < cur_mon_cnt}
     # now, monitor_set is only including monitors whose monitor_count is cur_mon_cnt
     monitor_set -= tmp_monitor_set
     # returns tmp_monitor_set and selected monitors from monitor_set at random

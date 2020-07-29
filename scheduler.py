@@ -9,12 +9,11 @@ import sys
 import time
 
 from combo import ERole, MonitorSchedule, assign_role_maxes, gen_monitor_combos
+from combo import MONITOR_ROLES_ALL, MONITOR_ROLES_AM
 import monitors
 
 HEADER_ROW_IDX = 7
 DATA_START_ROW_IDX = HEADER_ROW_IDX + 1
-MONITOR_ROLES_ALL = {ERole.AM1, ERole.AM2, ERole.PM, }
-MONITOR_ROLES_AM = {ERole.AM1, ERole.AM2, }
 
 
 @dataclass
