@@ -142,25 +142,6 @@ def filter_pm_pm_in_a_row(ms: MonitorSchedule, day: datetime):
     return filters
 
 
-# def filter_by_pre_day_role(ms_list, day: datetime):
-#     filters = []
-#     for ms in ms_list:
-#         pre_day = day - timedelta(days=1)
-#         if role := ms.schedule.get(pre_day):
-#             if role == ERole.PM:
-#                 filters.append(_create_monitor_combo_filter(
-#                     ms.monitor, include=False, roles=MONITOR_ROLES_ALL))
-#             if role in MONITOR_ROLES_AM:
-#                 filters.append(_create_monitor_combo_filter(
-#                     ms.monitor, include=False, roles=MONITOR_ROLES_AM))
-#
-#         next_day = day + timedelta(days=1)
-#         if role := ms.schedule.get(next_day):
-#             if role in MONITOR_ROLES_AM:
-#                 filters.append(_create_monitor_combo_filter(
-#                     ms.monitor, include=False, roles=MONITOR_ROLES_ALL))
-
-
 def _create_monitor_combo_filter(monitor, include=True, roles=None):
     if include:
         return lambda monitor_combo: monitor_combo.contains_monitor(monitor, roles)

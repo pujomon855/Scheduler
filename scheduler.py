@@ -60,37 +60,6 @@ def make_schedule(excel_path):
     # wb.save(excel_path)
 
 
-def debug_schedules(monitor_schedule_dict, weekdays):
-    date_str = 'date'
-    print(f'{date_str: <19}: {ERole.AM1.name}, {ERole.AM2.name}, {ERole.PM.name}, '
-          f'{ERole.N.name}, {ERole.R.name}')
-    print_roles = {ERole.AM1, ERole.AM2, ERole.PM, ERole.N, ERole.R, }
-    ms_list = monitor_schedule_dict.values()
-    for day in sorted(weekdays):
-        md = {}
-        normals = []
-        remotes = []
-        for ms in ms_list:
-            if (role := ms.schedule.get(day)) in print_roles:
-                if role == ERole.R:
-                    remotes.append(ms.monitor.name)
-                elif role == ERole.N:
-                    normals.append(ms.monitor.name)
-                else:
-                    md[role] = ms.monitor.name
-        am1 = md.get(ERole.AM1)
-        am2 = md.get(ERole.AM2)
-        pm = md.get(ERole.PM)
-        n = ' & '.join(normals)
-        r = ' & '.join(remotes)
-        print(f'{day}: {am1}, {am2}, {pm}, {n}, {r}')
-    print()
-    print('name, AM1, AM2, PM, SUM, R')
-    for m, ms in monitor_schedule_dict.items():
-        print(f'{m.name}, {ms.am1_count}, {ms.am2_count}, {ms.pm_count}, {ms.monitor_count}, '
-              f'{ms.get_role_count(ERole.R)}')
-
-
 def load_initial_schedules(ws, monitor_dict):
     """
     指定シートからあらかじめ代入されている予定を読み取り、各監視者のスケジュールを初期化する。
@@ -245,7 +214,7 @@ def load_manual_remote_max(ws, monitor_schedule_dict):
 
 
 def assign_remotes(monitor_schedule_dict, must_work_at_office_groups, weekdays,
-                   max_num_of_remotes_per_day=2, try_cnt1=5000, try_cnt2=3000):
+                   max_num_of_remotes_per_day=2, try_cnt1=500, try_cnt2=300):
     """
     在宅勤務の割り当てを行う。
     条件によっては割り当てられない日もある。
@@ -372,6 +341,37 @@ def elapsed_time(f):
         return v
 
     return wrapper
+
+
+def debug_schedules(monitor_schedule_dict, weekdays):
+    date_str = 'date'
+    print(f'{date_str: <19}: {ERole.AM1.name}, {ERole.AM2.name}, {ERole.PM.name}, '
+          f'{ERole.N.name}, {ERole.R.name}')
+    print_roles = {ERole.AM1, ERole.AM2, ERole.PM, ERole.N, ERole.R, }
+    ms_list = monitor_schedule_dict.values()
+    for day in sorted(weekdays):
+        md = {}
+        normals = []
+        remotes = []
+        for ms in ms_list:
+            if (role := ms.schedule.get(day)) in print_roles:
+                if role == ERole.R:
+                    remotes.append(ms.monitor.name)
+                elif role == ERole.N:
+                    normals.append(ms.monitor.name)
+                else:
+                    md[role] = ms.monitor.name
+        am1 = md.get(ERole.AM1)
+        am2 = md.get(ERole.AM2)
+        pm = md.get(ERole.PM)
+        n = ' & '.join(normals)
+        r = ' & '.join(remotes)
+        print(f'{day}: {am1}, {am2}, {pm}, {n}, {r}')
+    print()
+    print('name, AM1, AM2, PM, SUM, R')
+    for m, ms in monitor_schedule_dict.items():
+        print(f'{m.name}, {ms.am1_count}, {ms.am2_count}, {ms.pm_count}, {ms.monitor_count}, '
+              f'{ms.get_role_count(ERole.R)}')
 
 
 @elapsed_time
