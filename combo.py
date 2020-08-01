@@ -19,6 +19,8 @@ class ERole(Enum):
 
 MONITOR_ROLES_ALL = {ERole.AM1, ERole.AM2, ERole.PM, }
 MONITOR_ROLES_AM = {ERole.AM1, ERole.AM2, }
+NOT_AT_OFFICE_ROLES = {ERole.R, ERole.OTHER, }
+OUTPUT_ROLES = {r for r in ERole if r != ERole.OTHER}
 
 
 @dataclass(frozen=True)
@@ -64,18 +66,15 @@ class MonitorSchedule:
 
     @property
     def am1_count(self):
-        return len([role for role in self.schedule.values()
-                    if role == ERole.AM1])
+        return self.get_role_count(ERole.AM1)
 
     @property
     def am2_count(self):
-        return len([role for role in self.schedule.values()
-                    if role == ERole.AM2])
+        return self.get_role_count(ERole.AM2)
 
     @property
     def pm_count(self):
-        return len([role for role in self.schedule.values()
-                    if role == ERole.PM])
+        return self.get_role_count(ERole.PM)
 
     @property
     def monitor_count(self):
@@ -97,6 +96,9 @@ class MonitorSchedule:
         if max_count := self.role_max.get(role):
             return len([r for r in self.schedule.values() if r == role]) >= max_count
         return False
+
+    def get_role_count(self, *roles):
+        return len([r for r in self.schedule.values() if r in roles])
 
     def __repr__(self):
         return f'{self.monitor.name}\'s schedule: {self.col_idx=}'
@@ -198,12 +200,16 @@ def assign_remote_max(monitor_schedule_dict, days, max_num_of_remotes_per_day=2)
     man_ass_ms = []
     not_man_ass_ms = []
     manual_remote_max = 0
+    not_work_at_office_days = 0
     for ms in monitor_schedule_dict.values():
         if remote_max := ms.role_max.get(ERole.R):
             man_ass_ms.append(ms)
             manual_remote_max += remote_max
         else:
             not_man_ass_ms.append(ms)
+        not_work_at_office_days += ms.get_role_count(ERole.R, ERole.OTHER)
+    # rem_remote_days = (days * max_num_of_remotes_per_day -
+    #                    manual_remote_max - not_work_at_office_days)
     rem_remote_days = days * max_num_of_remotes_per_day - manual_remote_max
 
     if rem_remote_days <= 0:
@@ -225,4 +231,4 @@ def assign_remote_max(monitor_schedule_dict, days, max_num_of_remotes_per_day=2)
 
 def _set_remote_max(monitor_schedules, remote_max):
     for ms in monitor_schedules:
-        ms.role_max[ERole.R] = remote_max
+        ms.role_max[ERole.R] = max(remote_max - ms.get_role_count(ERole.OTHER), 0)

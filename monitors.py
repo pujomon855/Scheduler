@@ -24,8 +24,17 @@ class Monitor:
     name: str
     is_fix_specialist: bool
 
+    def __repr__(self):
+        return self.name
+
 
 def load_monitors_info(wb):
+    """
+    Excelから監視者情報をよみこむ
+
+    :param wb: workbook
+    :return: [監視者の辞書]と[最低１人は出社する必要のある監視者の組み合わせのリスト]のtuple
+    """
     ws = wb['monitors']
     monitor_dict = {}
     tmp_must_work_at_office_groups = []
@@ -47,6 +56,6 @@ def load_monitors_info(wb):
         m1 = monitor_dict.get(name1)
         m2 = monitor_dict.get(name2)
         if m1 and m2:
-            must_work_at_office_groups.append((m1, m2))
+            must_work_at_office_groups.append({m1, m2})
 
     return monitor_dict, must_work_at_office_groups
