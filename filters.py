@@ -164,7 +164,7 @@ class EMonitorComboFilters(Enum):
     MONITORING_MAX = (FILTER_PRIORITY1, filter_monitoring_max)
     AM_AM_IN_A_ROW = (FILTER_PRIORITY2, filter_am_am_in_a_row)
     PM_AM_IN_A_ROW = (FILTER_PRIORITY2, filter_pm_am_in_a_row)
-    # PM_PM_IN_A_ROW = (FILTER_PRIORITY2, filter_pm_pm_in_a_row)
+    PM_PM_IN_A_ROW = (FILTER_PRIORITY2, filter_pm_pm_in_a_row)
 
     def __init__(self, priority, filter_func):
         self.__priority = priority

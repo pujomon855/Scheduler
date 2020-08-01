@@ -57,8 +57,8 @@ def make_schedule(excel_path):
         print(f'{m.name}\'s {ms.role_max[ERole.R]=}')
     print()
 
-    # output_schedules(ws, monitor_schedule_dict, weekday_dict)
-    # wb.save(excel_path)
+    output_schedules(ws, monitor_schedule_dict, weekday_dict)
+    wb.save(excel_path)
 
 
 def load_initial_schedules(ws, monitor_dict):
@@ -74,13 +74,13 @@ def load_initial_schedules(ws, monitor_dict):
     num_of_monitors = len(monitor_dict)
     monitor_list = monitor_dict.values()
     weekday_dict = {}
+    holiday_col = find_col_idx_by_val(ws, HEADER_ROW_IDX, 'Holiday')
     for row_idx, row in enumerate(ws.iter_rows(min_row=DATA_START_ROW_IDX, max_col=num_of_monitors + 2),
                                   DATA_START_ROW_IDX):
         day = row[0].value
         if not day:
             break
-        holiday_cell = row[num_of_monitors + 1]
-        if not is_weekday(day, holiday_cell):
+        if not is_weekday(day, ws.cell(row=row_idx, column=holiday_col)):
             continue
         day_priority = DayPriority(day)
         weekday_dict[row_idx] = day_priority
@@ -310,7 +310,7 @@ def fill_in_blanks_to(monitor_schedule_dict, weekdays, role):
 
 
 def output_schedules(ws, monitor_schedule_dict, weekday_dict):
-    monitor_name_st_col = len(monitor_schedule_dict) + 4
+    monitor_name_st_col = find_col_idx_by_val(ws, HEADER_ROW_IDX, ERole.AM1.name)
     monitor_name_cols = {
         ERole.AM1: monitor_name_st_col,
         ERole.AM2: monitor_name_st_col + 1,
@@ -322,6 +322,13 @@ def output_schedules(ws, monitor_schedule_dict, weekday_dict):
                 ws.cell(row=row_idx, column=ms.col_idx, value=role.name)
                 if col_idx := monitor_name_cols.get(role):
                     ws.cell(row=row_idx, column=col_idx, value=ms.monitor.name)
+
+
+def find_col_idx_by_val(ws, row_idx, value):
+    for row in ws.iter_rows(min_row=row_idx, max_row=row_idx):
+        for cell in row:
+            if cell.value == value:
+                return cell.column
 
 
 def elapsed_time(f):
