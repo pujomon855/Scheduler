@@ -2,7 +2,7 @@
 
 import copy
 from dataclasses import dataclass
-from datetime import datetime, timedelta
+from datetime import datetime
 from itertools import combinations
 import openpyxl
 import random
@@ -10,8 +10,8 @@ import sys
 import time
 
 from combo import MonitorSchedule, assign_remote_max, assign_role_maxes, gen_monitor_combos
-from combo import ERole, MONITOR_ROLES_ALL, MONITOR_ROLES_AM, NOT_AT_OFFICE_ROLES, OUTPUT_ROLES
-from filters import ERemoteFilters, FILTER_PRIORITY1, FILTER_PRIORITY2
+from combo import ERole, MONITOR_ROLES_ALL, NOT_AT_OFFICE_ROLES, OUTPUT_ROLES
+from filters import ERemoteFilters, FILTER_PRIORITY1, FILTER_PRIORITY2, get_filters_for_monitor_combo
 import monitors
 
 HEADER_ROW_IDX = 7
@@ -168,12 +168,14 @@ def assign_monitors(all_monitors, monitor_schedule_dict, weekdays,
     """
     cp_monitor_schedule_dict = copy_monitor_schedule_dict(monitor_schedule_dict)
     res_monitor_schedule_dict = _try_assign_monitors(
-        all_monitors, monitor_schedule_dict, cp_monitor_schedule_dict, weekdays, try_cnt1)
+        all_monitors, monitor_schedule_dict, cp_monitor_schedule_dict, weekdays, try_cnt1,
+        FILTER_PRIORITY2)
     if res_monitor_schedule_dict:
         return res_monitor_schedule_dict
     else:
         cp_monitor_schedule_dict = _try_assign_monitors(
-            all_monitors, monitor_schedule_dict, cp_monitor_schedule_dict, weekdays, try_cnt2, True)
+            all_monitors, monitor_schedule_dict, cp_monitor_schedule_dict, weekdays, try_cnt2,
+            FILTER_PRIORITY1)
         if cp_monitor_schedule_dict:
             return cp_monitor_schedule_dict
         else:
@@ -188,42 +190,38 @@ def copy_monitor_schedule_dict(monitor_schedule_dict):
     return cp
 
 
-def _try_assign_monitors(all_monitors, msd, cp_msd, weekdays, try_cnt, ignore_prev_day=False):
+def _try_assign_monitors(all_monitors, msd, cp_msd, weekdays, try_cnt, filter_priority):
     for i in range(try_cnt):
-        if _assign_monitors(all_monitors, cp_msd, weekdays, ignore_prev_day):
-            print(f'{ignore_prev_day=}: {i + 1}: found.')
+        if _assign_monitors(all_monitors, cp_msd, weekdays, filter_priority):
+            print(f'{filter_priority=}: {i + 1}: found.')
             return cp_msd
         cp_msd = copy_monitor_schedule_dict(msd)
-    print(f'{ignore_prev_day=}: {try_cnt}: not found.')
+    print(f'{filter_priority=}: {try_cnt}: not found.')
     return None
 
 
 def _assign_monitors(monitor_set, monitor_schedule_dict, weekdays,
-                     ignore_prev_day=False, force_exec=False):
+                     filter_priority, force_exec=False):
     """
     監視当番の割り振りを行う。
 
     :param monitor_set: 監視者のset
     :param monitor_schedule_dict: 監視スケジュールのdict(key:=Monitor, item:=MonitorSchedule)
     :param weekdays: 営業日のIterable
-    :param ignore_prev_day: 前日からの連続条件を除外する場合はTrue
+    :param filter_priority: フィルタ優先度
     :param force_exec: 均等な割り振りが不可の場合でも、その日を除いて処理を続行する場合はTrueを設定する
     :return: 割り振りが完了した場合はTrue
     """
     all_monitor_combos = set(gen_monitor_combos(monitor_set))
+    ms_list = monitor_schedule_dict.values()
     for day in weekdays:
-        filters = create_filters(day, monitor_schedule_dict)
+        filters = get_filters_for_monitor_combo(ms_list, day, filter_priority)
         # extract monitor combo that meets all filters.
         monitor_combos = [mc for mc in all_monitor_combos if all([f(mc) for f in filters])]
         if not monitor_combos:
-            if not ignore_prev_day:
-                return False
-            filters = create_filters(day, monitor_schedule_dict, False)
-            monitor_combos = [mc for mc in all_monitor_combos if all([f(mc) for f in filters])]
-            if not monitor_combos:
-                if not force_exec:
-                    return False
+            if force_exec:
                 continue
+            return False
 
         # Choice a monitor combo at random.
         monitor_combo = random.choice(monitor_combos)
@@ -231,50 +229,6 @@ def _assign_monitors(monitor_set, monitor_schedule_dict, weekdays,
         monitor_schedule_dict[monitor_combo.monitor_am2].schedule[day] = ERole.AM2
         monitor_schedule_dict[monitor_combo.monitor_pm].schedule[day] = ERole.PM
     return True
-
-
-def create_filters(day, monitor_schedule_dict, include_pre_day=True):
-    filters = []
-    for ms in monitor_schedule_dict.values():
-        # Manually input day role
-        if role := ms.schedule.get(day):
-            if role in MONITOR_ROLES_ALL:
-                filters.append(create_filter(ms.monitor, roles=[role]))
-            elif role == ERole.OTHER:
-                filters.append(create_filter(ms.monitor, include=False))
-        else:
-            # Adjust monitoring days
-            filter_roles = []
-            if ms.is_role_max(ERole.AM1):
-                filter_roles.append(ERole.AM1)
-            if ms.is_role_max(ERole.AM2):
-                filter_roles.append(ERole.AM2)
-            if ms.is_role_max(ERole.PM):
-                filter_roles.append(ERole.PM)
-            if filter_roles:
-                filters.append(create_filter(ms.monitor, include=False, roles=filter_roles))
-
-        # Not to monitor am if monitor pm 1 day before.
-        if include_pre_day:
-            pre_day = day - timedelta(days=1)
-            if role := ms.schedule.get(pre_day):
-                if role == ERole.PM:
-                    filters.append(create_filter(ms.monitor, include=False, roles=MONITOR_ROLES_ALL))
-                if role in MONITOR_ROLES_AM:
-                    filters.append(create_filter(ms.monitor, include=False, roles=MONITOR_ROLES_AM))
-
-            next_day = day + timedelta(days=1)
-            if role := ms.schedule.get(next_day):
-                if role in MONITOR_ROLES_AM:
-                    filters.append(create_filter(ms.monitor, include=False, roles=MONITOR_ROLES_ALL))
-    return filters
-
-
-def create_filter(monitor, include=True, roles=None):
-    if include:
-        return lambda monitor_combo: monitor_combo.contains_monitor(monitor, roles)
-    else:
-        return lambda monitor_combo: not monitor_combo.contains_monitor(monitor, roles)
 
 
 def load_manual_remote_max(ws, monitor_schedule_dict):
