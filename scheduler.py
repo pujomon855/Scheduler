@@ -11,7 +11,8 @@ import time
 
 from combo import MonitorSchedule, assign_remote_max, assign_role_maxes, gen_monitor_combos
 from combo import ERole, MONITOR_ROLES_ALL, NOT_AT_OFFICE_ROLES, OUTPUT_ROLES
-from filters import ERemoteFilters, FILTER_PRIORITY1, FILTER_PRIORITY2, get_filters_for_monitor_combo
+from filters import FILTER_PRIORITY1, FILTER_PRIORITY2
+from filters import get_filters_for_monitor_combo, get_filters_for_remotes
 import monitors
 
 HEADER_ROW_IDX = 7
@@ -280,7 +281,7 @@ def _assign_remotes(monitor_schedule_dict, must_work_at_office_groups, weekdays,
             continue
 
         remote_groups = []
-        remote_filters = get_remote_filters(
+        remote_filters = get_filters_for_remotes(
             monitor_schedule_dict, day, must_work_at_office_groups, filter_priority)
 
         for group in combinations(at_office_but_not_monitors, num_of_remote_monitors):
@@ -297,16 +298,6 @@ def _assign_remotes(monitor_schedule_dict, must_work_at_office_groups, weekdays,
         for m in remote_monitor_set:
             monitor_schedule_dict[m].schedule[day] = ERole.R
     return True
-
-
-def get_remote_filters(ms_dict: dict, day: datetime, must_work_at_office_groups: list,
-                       filter_priority: int):
-    remote_filters = []
-    for remote_filter in ERemoteFilters:
-        if remote_filter.priority <= filter_priority:
-            remote_filters.extend(
-                remote_filter.get_filters(ms_dict, day, must_work_at_office_groups))
-    return remote_filters
 
 
 def fill_in_blanks_to(monitor_schedule_dict, weekdays, role):

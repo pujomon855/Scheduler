@@ -80,6 +80,16 @@ class ERemoteFilters(Enum):
         return self.__filter_func(ms_dict, day, must_work_at_office_groups)
 
 
+def get_filters_for_remotes(ms_dict: dict, day: datetime, must_work_at_office_groups: list,
+                            filter_priority: int):
+    remote_filters = []
+    for remote_filter in ERemoteFilters:
+        if remote_filter.priority <= filter_priority:
+            remote_filters.extend(
+                remote_filter.get_filters(ms_dict, day, must_work_at_office_groups))
+    return remote_filters
+
+
 # Filters for MonitorCombo
 
 def filter_manual_input(ms: MonitorSchedule, day: datetime):
