@@ -30,8 +30,14 @@ def filter_must_work_at_office(
                            if ms.schedule.get(day) in NOT_AT_OFFICE_ROLES}
     for must_work_at_office_group in must_work_at_office_groups:
         if must_work_at_office_monitors := must_work_at_office_group - not_office_monitors:
-            filters.append(lambda monitor_set: not (monitor_set >= must_work_at_office_monitors))
+            filters.append(_create_filter_func(must_work_at_office_monitors))
     return filters
+
+
+def _create_filter_func(must_work_at_office_monitors):
+    def func(monitor_set: set):
+        return not (monitor_set >= must_work_at_office_monitors)
+    return func
 
 
 def filter_remote_max(
@@ -164,7 +170,7 @@ class EMonitorComboFilters(Enum):
     MONITORING_MAX = (FILTER_PRIORITY1, filter_monitoring_max)
     AM_AM_IN_A_ROW = (FILTER_PRIORITY2, filter_am_am_in_a_row)
     PM_AM_IN_A_ROW = (FILTER_PRIORITY2, filter_pm_am_in_a_row)
-    PM_PM_IN_A_ROW = (FILTER_PRIORITY2, filter_pm_pm_in_a_row)
+    # PM_PM_IN_A_ROW = (FILTER_PRIORITY2, filter_pm_pm_in_a_row)
 
     def __init__(self, priority, filter_func):
         self.__priority = priority
