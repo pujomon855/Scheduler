@@ -238,7 +238,7 @@ def load_remote_per_day(ws) -> int:
 
 
 def assign_remotes(monitor_schedule_dict, weekdays, filter_manager: RemoteFilterManager,
-                   max_num_of_remotes_per_day=2, try_cnt1=1000, try_cnt2=1000,
+                   max_num_of_remotes_per_day=2, try_cnt1=1000, try_cnt2=10000,
                    try_cnt3=1000):
     """
     在宅勤務の割り当てを行う。
