@@ -18,6 +18,7 @@ import monitors
 HEADER_ROW_IDX = 7
 DATA_START_ROW_IDX = HEADER_ROW_IDX + 1
 REMOTE_MAX_ROW_IDX = HEADER_ROW_IDX - 1
+REMOTE_PER_DAY_ROW_IDX = REMOTE_MAX_ROW_IDX - 1
 
 
 @dataclass
@@ -46,9 +47,11 @@ def make_schedule(excel_path):
     monitor_schedule_dict = assign_monitors(all_monitors, monitor_schedule_dict, weekdays)
 
     load_manual_remote_max(ws, monitor_schedule_dict)
-    assign_remote_max(monitor_schedule_dict, days)
+    max_num_of_remotes_per_day = load_remote_per_day(ws)
+    assign_remote_max(monitor_schedule_dict, days,
+                      max_num_of_remotes_per_day=max_num_of_remotes_per_day)
 
-    for max_num_of_remotes_per_day in range(2, 0, -1):
+    for max_num_of_remotes_per_day in range(max_num_of_remotes_per_day, 0, -1):
         monitor_schedule_dict, num_of_unassigned_days = assign_remotes(
             monitor_schedule_dict, must_work_at_office_groups, sorted(weekdays),
             max_num_of_remotes_per_day=max_num_of_remotes_per_day)
@@ -219,6 +222,21 @@ def load_manual_remote_max(ws, monitor_schedule_dict):
             ms.role_max[ERole.R] = remote_max
 
 
+def load_remote_per_day(ws) -> int:
+    """
+    1日の最大の在宅勤務者数を読み込む。
+    入力なしの場合や負の値、数値以外が入力されている場合は0を返す。
+
+    :param ws: 読み込むシート
+    :return: 1日の最大の在宅勤務者数
+    """
+    remote_per_day = ws.cell(row=REMOTE_PER_DAY_ROW_IDX, column=2).value
+    print(f'{remote_per_day=}')
+    if isinstance(remote_per_day, int) and remote_per_day >= 0:
+        return remote_per_day
+    return 0
+
+
 def assign_remotes(monitor_schedule_dict, must_work_at_office_groups, weekdays,
                    max_num_of_remotes_per_day=2, try_cnt1=1000, try_cnt2=1000,
                    try_cnt3=1000):
@@ -329,11 +347,9 @@ def _assign_remotes(monitor_schedule_dict, must_work_at_office_groups, weekdays,
 
 def fill_in_blanks_to(monitor_schedule_dict, weekdays, role):
     for day in weekdays:
-        if [ms for ms in monitor_schedule_dict.values()
-                if ms.schedule.get(day) in NOT_AT_OFFICE_ROLES]:
-            for ms in monitor_schedule_dict.values():
-                if day not in ms.schedule:
-                    ms.schedule[day] = role
+        for ms in monitor_schedule_dict.values():
+            if day not in ms.schedule:
+                ms.schedule[day] = role
 
 
 def output_schedules(ws, monitor_schedule_dict, weekday_dict):
