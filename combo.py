@@ -207,7 +207,7 @@ def assign_remote_max(monitor_schedule_dict, days, max_num_of_remotes_per_day=2)
             manual_remote_max += remote_max
         else:
             not_man_ass_ms.append(ms)
-        not_work_at_office_days += ms.get_role_count(ERole.R, ERole.OTHER)
+        not_work_at_office_days += ms.get_role_count(NOT_AT_OFFICE_ROLES)
     rem_remote_days = days * max_num_of_remotes_per_day - manual_remote_max
 
     if rem_remote_days <= 0:
