@@ -11,8 +11,7 @@ import time
 
 from combo import MonitorSchedule, assign_remote_max, assign_role_maxes, gen_monitor_combos
 from combo import ERole, MONITOR_ROLES_ALL, NOT_AT_OFFICE_ROLES, OUTPUT_ROLES
-from filters import FILTER_PRIORITY1, FILTER_PRIORITY2
-from filters import get_filters_for_monitor_combo, get_filters_for_remotes
+from filters import FILTER_PRIORITY1, FILTER_PRIORITY2, MonitorFilterManager, RemoteFilterManager
 import monitors
 
 HEADER_ROW_IDX = 7
@@ -44,26 +43,25 @@ def make_schedule(excel_path):
     days = len(weekday_dict)
     assign_role_maxes(monitor_schedule_dict, MONITOR_ROLES_ALL, days)
 
-    monitor_schedule_dict = assign_monitors(all_monitors, monitor_schedule_dict, weekdays)
+    filter_ws = wb['filters']
+    monitor_filter_manager = MonitorFilterManager(filter_ws)
+    monitor_schedule_dict = assign_monitors(
+        all_monitors, monitor_schedule_dict, weekdays, monitor_filter_manager)
 
     load_manual_remote_max(ws, monitor_schedule_dict)
     max_num_of_remotes_per_day = load_remote_per_day(ws)
     assign_remote_max(monitor_schedule_dict, days,
                       max_num_of_remotes_per_day=max_num_of_remotes_per_day)
-
+    remote_filter_manager = RemoteFilterManager(filter_ws, must_work_at_office_groups)
     for max_num_of_remotes_per_day in range(max_num_of_remotes_per_day, 0, -1):
         monitor_schedule_dict, num_of_unassigned_days = assign_remotes(
-            monitor_schedule_dict, must_work_at_office_groups, sorted(weekdays),
+            monitor_schedule_dict, sorted(weekdays), remote_filter_manager,
             max_num_of_remotes_per_day=max_num_of_remotes_per_day)
         if num_of_unassigned_days <= 0:
             break
 
     fill_in_blanks_to(monitor_schedule_dict, weekdays, ERole.N)
     debug_schedules(monitor_schedule_dict, weekdays)
-    print()
-    for m, ms in monitor_schedule_dict.items():
-        print(f'{m.name}\'s {ms.role_max[ERole.R]=}')
-    print()
 
     output_schedules(ws, monitor_schedule_dict, weekday_dict)
     wb.save(excel_path)
@@ -132,7 +130,7 @@ def convert_val_to_role(val):
     return ERole.OTHER
 
 
-def assign_monitors(all_monitors, monitor_schedule_dict, weekdays,
+def assign_monitors(all_monitors, monitor_schedule_dict, weekdays, filter_manager: MonitorFilterManager,
                     try_cnt1=1000, try_cnt2=1000):
     """
     監視当番の割り当てを行う。
@@ -140,24 +138,26 @@ def assign_monitors(all_monitors, monitor_schedule_dict, weekdays,
     :param all_monitors: 監視者のset
     :param monitor_schedule_dict: 監視スケジュールのdict(key:=Monitor, item:=MonitorSchedule)
     :param weekdays: 営業日のIterable
+    :param filter_manager: フィルタ管理クラス
     :param try_cnt1: 全フィルタを使用しての割り当て試行回数
     :param try_cnt2: 条件を緩くしての割り当て試行回数
     :return: 監視当番を割り当てた監視スケジュールのdict
     """
     cp_monitor_schedule_dict = copy_monitor_schedule_dict(monitor_schedule_dict)
     res_monitor_schedule_dict = _try_assign_monitors(
-        all_monitors, monitor_schedule_dict, cp_monitor_schedule_dict, weekdays, try_cnt1,
-        FILTER_PRIORITY2)
+        all_monitors, monitor_schedule_dict, cp_monitor_schedule_dict, weekdays, filter_manager,
+        try_cnt1, FILTER_PRIORITY2)
     if res_monitor_schedule_dict:
         return res_monitor_schedule_dict
     else:
         cp_monitor_schedule_dict = _try_assign_monitors(
-            all_monitors, monitor_schedule_dict, cp_monitor_schedule_dict, weekdays, try_cnt2,
-            FILTER_PRIORITY1)
+            all_monitors, monitor_schedule_dict, cp_monitor_schedule_dict, weekdays, filter_manager,
+            try_cnt2, FILTER_PRIORITY1)
         if cp_monitor_schedule_dict:
             return cp_monitor_schedule_dict
         else:
-            _assign_monitors(all_monitors, monitor_schedule_dict, weekdays, True, True)
+            _assign_monitors(all_monitors, monitor_schedule_dict, weekdays, filter_manager,
+                             True, True)
             return monitor_schedule_dict
 
 
@@ -168,9 +168,9 @@ def copy_monitor_schedule_dict(monitor_schedule_dict):
     return cp
 
 
-def _try_assign_monitors(all_monitors, msd, cp_msd, weekdays, try_cnt, filter_priority):
+def _try_assign_monitors(all_monitors, msd, cp_msd, weekdays, fm, try_cnt, filter_priority):
     for i in range(try_cnt):
-        if _assign_monitors(all_monitors, cp_msd, weekdays, filter_priority):
+        if _assign_monitors(all_monitors, cp_msd, weekdays, fm, filter_priority):
             print(f'MONITOR: {filter_priority=}: {i + 1}: found.')
             return cp_msd
         cp_msd = copy_monitor_schedule_dict(msd)
@@ -178,7 +178,7 @@ def _try_assign_monitors(all_monitors, msd, cp_msd, weekdays, try_cnt, filter_pr
     return None
 
 
-def _assign_monitors(monitor_set, monitor_schedule_dict, weekdays,
+def _assign_monitors(monitor_set, monitor_schedule_dict, weekdays, fm,
                      filter_priority, force_exec=False):
     """
     監視当番の割り振りを行う。
@@ -186,6 +186,7 @@ def _assign_monitors(monitor_set, monitor_schedule_dict, weekdays,
     :param monitor_set: 監視者のset
     :param monitor_schedule_dict: 監視スケジュールのdict(key:=Monitor, item:=MonitorSchedule)
     :param weekdays: 営業日のIterable
+    :param fm: フィルタ管理クラス
     :param filter_priority: フィルタ優先度
     :param force_exec: 均等な割り振りが不可の場合でも、その日を除いて処理を続行する場合はTrueを設定する
     :return: 割り振りが完了した場合はTrue
@@ -193,7 +194,7 @@ def _assign_monitors(monitor_set, monitor_schedule_dict, weekdays,
     all_monitor_combos = set(gen_monitor_combos(monitor_set))
     ms_list = monitor_schedule_dict.values()
     for day in weekdays:
-        filters = get_filters_for_monitor_combo(ms_list, day, filter_priority)
+        filters = fm.get_filters(ms_list, day, filter_priority)
         # extract monitor combo that meets all filters.
         monitor_combos = [mc for mc in all_monitor_combos if all([f(mc) for f in filters])]
         if not monitor_combos:
@@ -231,13 +232,12 @@ def load_remote_per_day(ws) -> int:
     :return: 1日の最大の在宅勤務者数
     """
     remote_per_day = ws.cell(row=REMOTE_PER_DAY_ROW_IDX, column=2).value
-    print(f'{remote_per_day=}')
     if isinstance(remote_per_day, int) and remote_per_day >= 0:
         return remote_per_day
     return 0
 
 
-def assign_remotes(monitor_schedule_dict, must_work_at_office_groups, weekdays,
+def assign_remotes(monitor_schedule_dict, weekdays, filter_manager: RemoteFilterManager,
                    max_num_of_remotes_per_day=2, try_cnt1=1000, try_cnt2=1000,
                    try_cnt3=1000):
     """
@@ -246,19 +246,19 @@ def assign_remotes(monitor_schedule_dict, must_work_at_office_groups, weekdays,
     割り当てられない日数はtry_cnt3の試行で最も少ない日のスケジュールを採用する。
 
     :param monitor_schedule_dict: 監視スケジュールのdict(key:=Monitor, item:=MonitorSchedule)
-    :param must_work_at_office_groups: 最低１人は出社する必要のある監視者の組み合わせのリスト
     :param weekdays: 営業日のIterable
+    :param filter_manager: フィルタ管理クラス
     :param max_num_of_remotes_per_day: 1日の在宅勤務の割り当て人数
     :param try_cnt1: 全フィルタを使用しての割り当て試行回数
     :param try_cnt2: 条件を緩くしての割り当て試行回数
     :param try_cnt3: 条件を緩くし、かつ未割当日許可での割り当て試行回数
     :return: tuple(在宅勤務を割り当てた監視スケジュールのdict, 未割当日数)
     """
-    tmp_msd = _try_assign_remotes(monitor_schedule_dict, must_work_at_office_groups, weekdays,
+    tmp_msd = _try_assign_remotes(monitor_schedule_dict, weekdays, filter_manager,
                                   max_num_of_remotes_per_day, try_cnt1, FILTER_PRIORITY2)
     if tmp_msd:
         return tmp_msd, 0
-    tmp_msd = _try_assign_remotes(monitor_schedule_dict, must_work_at_office_groups, weekdays,
+    tmp_msd = _try_assign_remotes(monitor_schedule_dict, weekdays, filter_manager,
                                   max_num_of_remotes_per_day, try_cnt2, FILTER_PRIORITY1)
     if tmp_msd:
         return tmp_msd, 0
@@ -267,11 +267,11 @@ def assign_remotes(monitor_schedule_dict, must_work_at_office_groups, weekdays,
     for i in range(try_cnt3):
         cp_msd = copy_monitor_schedule_dict(monitor_schedule_dict)
         assigned, num_of_unassigned_days = _assign_remotes(
-            cp_msd, must_work_at_office_groups, weekdays,
+            cp_msd, weekdays, filter_manager,
             max_num_of_remotes_per_day, FILTER_PRIORITY1, force_exec=True)
         if assigned:
             print(f'REMOTE2: {FILTER_PRIORITY1=}: {i + 1}: found.')
-            return cp_msd
+            return cp_msd, 0
         if num_of_unassigned_days < min_num_of_unassigned_days:
             min_num_of_unassigned_days = num_of_unassigned_days
             tmp_msd = cp_msd
@@ -279,11 +279,11 @@ def assign_remotes(monitor_schedule_dict, must_work_at_office_groups, weekdays,
     return tmp_msd, min_num_of_unassigned_days
 
 
-def _try_assign_remotes(msd, must_work_at_office_groups, weekdays,
+def _try_assign_remotes(msd, weekdays, fm,
                         max_num_of_remotes_per_day, try_cnt, filter_priority):
     for i in range(try_cnt):
         cp_msd = copy_monitor_schedule_dict(msd)
-        assigned, _ = _assign_remotes(cp_msd, must_work_at_office_groups, weekdays,
+        assigned, _ = _assign_remotes(cp_msd, weekdays, fm,
                                       max_num_of_remotes_per_day, filter_priority)
         if assigned:
             print(f'REMOTE: {filter_priority=}, {max_num_of_remotes_per_day=}: {i + 1}: found.')
@@ -292,38 +292,38 @@ def _try_assign_remotes(msd, must_work_at_office_groups, weekdays,
     return None
 
 
-def _assign_remotes(monitor_schedule_dict, must_work_at_office_groups, weekdays,
+def _assign_remotes(monitor_schedule_dict, weekdays, fm,
                     max_num_of_remotes_per_day, filter_priority, force_exec=False):
     """
     在宅勤務の割り当てを行う。
     条件によっては割り当てられない日もある。
 
     :param monitor_schedule_dict: 監視スケジュールのdict(key:=Monitor, item:=MonitorSchedule)
-    :param must_work_at_office_groups: 最低１人は出社する必要のある監視者の組み合わせのリスト
     :param weekdays: 営業日のIterable
+    :param fm: フィルタ管理クラス
     :param max_num_of_remotes_per_day: 1日の在宅勤務の割り当て人数
     :param filter_priority: フィルタ優先度
     :param force_exec: 均等な割り振りが不可の場合でも、その日を除いて処理を続行する場合はTrueを設定する
     :return: tuple(割り当て結果(全日程で割り当て完了の場合はTrue), 未割当日数)
     """
     num_of_assigned_days = 0
+    ms_list = monitor_schedule_dict.values()
     for day in weekdays:
         not_at_office_monitors = set()
         at_office_but_not_monitors = set()
-        for m, ms in monitor_schedule_dict.items():
+        for ms in ms_list:
             role = ms.schedule.get(day)
             if role is None:
-                at_office_but_not_monitors.add(m)
+                at_office_but_not_monitors.add(ms.monitor)
             elif role in NOT_AT_OFFICE_ROLES:
-                not_at_office_monitors.add(m)
+                not_at_office_monitors.add(ms.monitor)
         num_of_remote_monitors = max_num_of_remotes_per_day - len(not_at_office_monitors)
         if num_of_remote_monitors <= 0:
             num_of_assigned_days += 1
             continue
 
         remote_groups = []
-        remote_filters = get_filters_for_remotes(
-            monitor_schedule_dict, day, must_work_at_office_groups, filter_priority)
+        remote_filters = fm.get_filters(ms_list, day, filter_priority)
 
         for group in combinations(at_office_but_not_monitors, num_of_remote_monitors):
             g = set(group)
@@ -413,6 +413,10 @@ def debug_schedules(monitor_schedule_dict, weekdays):
     for m, ms in monitor_schedule_dict.items():
         print(f'{m.name}, {ms.am1_count}, {ms.am2_count}, {ms.pm_count}, {ms.monitor_count}, '
               f'{ms.get_role_count(ERole.R)}')
+    print()
+    for m, ms in monitor_schedule_dict.items():
+        print(f'{m.name}\'s {ms.role_max[ERole.R]=}')
+    print()
 
 
 @elapsed_time

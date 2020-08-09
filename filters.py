@@ -6,6 +6,76 @@ from enum import Enum
 from combo import ERole, MONITOR_ROLES_ALL, MONITOR_ROLES_AM, NOT_AT_OFFICE_ROLES, MonitorSchedule
 
 
+FILTER_PRIORITY1 = 1
+FILTER_PRIORITY2 = 2
+
+
+class FilterManager:
+    _FILTER_DATA_ST_ROW_IDX = 7
+
+    def __init__(self, filter_cls, ws, name_col_idx, disable_col_idx):
+        self.filter_cls = filter_cls
+        self.filters = set()
+        for row in ws.iter_rows(min_row=FilterManager._FILTER_DATA_ST_ROW_IDX,
+                                min_col=name_col_idx, max_col=disable_col_idx):
+            filter_name = row[0].value
+            if filter_name is None:
+                break
+            try:
+                filter_enum = convert_str_to_filter(self.filter_cls, filter_name)
+            except ValueError as e:
+                print(f'{e}')
+                continue
+            else:
+                if row[disable_col_idx - name_col_idx].value != 'Y':
+                    self.filters.add(filter_enum)
+
+    def get_filters(self, ms_list, day, filter_priority=FILTER_PRIORITY2):
+        pass
+
+
+def convert_str_to_filter(filter_cls, name):
+    for e in filter_cls:
+        if e.name == name:
+            return e
+    raise ValueError(f'{name} is not a member of {filter_cls}.')
+
+
+class RemoteFilterManager(FilterManager):
+    _NAME_COL_IDX = 9
+    _DISABLE_COL_IDX = 11
+
+    def __init__(self, ws, must_work_at_office_groups: list):
+        super().__init__(ERemoteFilters, ws,
+                         RemoteFilterManager._NAME_COL_IDX, RemoteFilterManager._DISABLE_COL_IDX)
+        self.must_work_at_office_groups = must_work_at_office_groups
+
+    def get_filters(self, ms_list, day, filter_priority=FILTER_PRIORITY2):
+        filters = []
+        for filter_enum in self.filters:
+            if filter_enum.priority <= filter_priority:
+                filters.extend(
+                    filter_enum.get_filters(ms_list, day, self.must_work_at_office_groups))
+        return filters
+
+
+class MonitorFilterManager(FilterManager):
+    _NAME_COL_IDX = 3
+    _DISABLE_COL_IDX = 5
+
+    def __init__(self, ws):
+        super().__init__(EMonitorComboFilters, ws,
+                         MonitorFilterManager._NAME_COL_IDX, MonitorFilterManager._DISABLE_COL_IDX)
+
+    def get_filters(self, ms_list, day, filter_priority=FILTER_PRIORITY2):
+        filters = []
+        for ms in ms_list:
+            for filter_enum in self.filters:
+                if filter_enum.priority <= filter_priority:
+                    filters.extend(filter_enum.get_filters(ms, day))
+        return filters
+
+
 # Filters for remotes
 
 # key:=(Monitor, bool), item:=filter function
@@ -13,20 +83,20 @@ __MONITOR_FILTERS = {}
 
 
 def filter_remote_2days_in_a_row(
-        ms_dict: dict, day: datetime, must_work_at_office_groups: list):
+        ms_list: list, day: datetime, must_work_at_office_groups: list):
     pre_day = day - timedelta(days=1)
     next_day = day + timedelta(days=1)
     filters = []
-    for ms in ms_dict.values():
+    for ms in ms_list:
         if ms.schedule.get(pre_day) == ERole.R or ms.schedule.get(next_day) == ERole.R:
             filters.append(_get_and_set_if_absent_monitor_filter(ms.monitor, False))
     return filters
 
 
 def filter_must_work_at_office(
-        ms_dict: dict, day: datetime, must_work_at_office_groups: list):
+        ms_list: list, day: datetime, must_work_at_office_groups: list):
     filters = []
-    not_office_monitors = {ms.monitor for ms in ms_dict.values()
+    not_office_monitors = {ms.monitor for ms in ms_list
                            if ms.schedule.get(day) in NOT_AT_OFFICE_ROLES}
     for must_work_at_office_group in must_work_at_office_groups:
         if must_work_at_office_monitors := must_work_at_office_group - not_office_monitors:
@@ -41,11 +111,11 @@ def _create_filter_func(must_work_at_office_monitors):
 
 
 def filter_remote_max(
-        ms_dict: dict, day: datetime, must_work_at_office_groups: list):
+        ms_list: list, day: datetime, must_work_at_office_groups: list):
     filters = []
-    for m, ms in ms_dict.items():
+    for ms in ms_list:
         if ms.is_role_max(ERole.R):
-            filters.append(_get_and_set_if_absent_monitor_filter(m, False))
+            filters.append(_get_and_set_if_absent_monitor_filter(ms.monitor, False))
     return filters
 
 
@@ -65,10 +135,6 @@ def _create_monitor_filter(monitor, include):
         return lambda monitor_set: monitor not in monitor_set
 
 
-FILTER_PRIORITY1 = 1
-FILTER_PRIORITY2 = 2
-
-
 class ERemoteFilters(Enum):
     REMOTE_2DAYS_IN_A_ROW = (FILTER_PRIORITY2, filter_remote_2days_in_a_row)
     MUST_WORK_AT_OFFICE_GROUP = (FILTER_PRIORITY1, filter_must_work_at_office)
@@ -82,18 +148,11 @@ class ERemoteFilters(Enum):
     def priority(self):
         return self.__priority
 
-    def get_filters(self, ms_dict: dict, day: datetime, must_work_at_office_groups: list):
-        return self.__filter_func(ms_dict, day, must_work_at_office_groups)
+    def get_filters(self, ms_list: list, day: datetime, must_work_at_office_groups: list):
+        return self.__filter_func(ms_list, day, must_work_at_office_groups)
 
-
-def get_filters_for_remotes(ms_dict: dict, day: datetime, must_work_at_office_groups: list,
-                            filter_priority: int):
-    remote_filters = []
-    for remote_filter in ERemoteFilters:
-        if remote_filter.priority <= filter_priority:
-            remote_filters.extend(
-                remote_filter.get_filters(ms_dict, day, must_work_at_office_groups))
-    return remote_filters
+    def __repr__(self):
+        return f'({self.__priority}, {self.name})'
 
 
 # Filters for MonitorCombo
@@ -170,7 +229,7 @@ class EMonitorComboFilters(Enum):
     MONITORING_MAX = (FILTER_PRIORITY1, filter_monitoring_max)
     AM_AM_IN_A_ROW = (FILTER_PRIORITY2, filter_am_am_in_a_row)
     PM_AM_IN_A_ROW = (FILTER_PRIORITY2, filter_pm_am_in_a_row)
-    # PM_PM_IN_A_ROW = (FILTER_PRIORITY2, filter_pm_pm_in_a_row)
+    PM_PM_IN_A_ROW = (FILTER_PRIORITY2, filter_pm_pm_in_a_row)
 
     def __init__(self, priority, filter_func):
         self.__priority = priority
@@ -183,11 +242,5 @@ class EMonitorComboFilters(Enum):
     def get_filters(self, ms: MonitorSchedule, day: datetime):
         return self.__filter_func(ms, day)
 
-
-def get_filters_for_monitor_combo(ms_list, day, filter_priority=FILTER_PRIORITY2):
-    filters = []
-    for ms in ms_list:
-        for mc_filter in EMonitorComboFilters:
-            if mc_filter.priority <= filter_priority:
-                filters.extend(mc_filter.get_filters(ms, day))
-    return filters
+    def __repr__(self):
+        return f'({self.__priority}, {self.name})'
