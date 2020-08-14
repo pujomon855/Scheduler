@@ -2,8 +2,9 @@
 
 from datetime import datetime, timedelta
 from enum import Enum
+from openpyxl.worksheet.worksheet import Worksheet
 
-from combo import ERole, MONITOR_ROLES_ALL, MONITOR_ROLES_AM, NOT_AT_OFFICE_ROLES, MonitorSchedule
+from monitors import ERole, MONITOR_ROLES_ALL, MONITOR_ROLES_AM, NOT_AT_OFFICE_ROLES, Monitor
 
 
 FILTER_PRIORITY1 = 1
@@ -13,7 +14,7 @@ FILTER_PRIORITY2 = 2
 class FilterManager:
     _FILTER_DATA_ST_ROW_IDX = 7
 
-    def __init__(self, filter_cls, ws, name_col_idx, disable_col_idx):
+    def __init__(self, filter_cls, ws: Worksheet, name_col_idx: int, disable_col_idx: int):
         self.filter_cls = filter_cls
         self.filters = set()
         for row in ws.iter_rows(min_row=FilterManager._FILTER_DATA_ST_ROW_IDX,
@@ -30,11 +31,11 @@ class FilterManager:
                 if row[disable_col_idx - name_col_idx].value != 'Y':
                     self.filters.add(filter_enum)
 
-    def get_filters(self, ms_list, day, filter_priority=FILTER_PRIORITY2):
-        pass
+    def get_filters(self, monitors, day: datetime, filter_priority=FILTER_PRIORITY2):
+        raise NotImplementedError
 
 
-def convert_str_to_filter(filter_cls, name):
+def convert_str_to_filter(filter_cls, name: str):
     for e in filter_cls:
         if e.name == name:
             return e
@@ -50,12 +51,12 @@ class RemoteFilterManager(FilterManager):
                          RemoteFilterManager._NAME_COL_IDX, RemoteFilterManager._DISABLE_COL_IDX)
         self.must_work_at_office_groups = must_work_at_office_groups
 
-    def get_filters(self, ms_list, day, filter_priority=FILTER_PRIORITY2):
+    def get_filters(self, monitors, day: datetime, filter_priority=FILTER_PRIORITY2):
         filters = []
         for filter_enum in self.filters:
             if filter_enum.priority <= filter_priority:
                 filters.extend(
-                    filter_enum.get_filters(ms_list, day, self.must_work_at_office_groups))
+                    filter_enum.get_filters(monitors, day, self.must_work_at_office_groups))
         return filters
 
 
@@ -67,12 +68,12 @@ class MonitorFilterManager(FilterManager):
         super().__init__(EMonitorComboFilters, ws,
                          MonitorFilterManager._NAME_COL_IDX, MonitorFilterManager._DISABLE_COL_IDX)
 
-    def get_filters(self, ms_list, day, filter_priority=FILTER_PRIORITY2):
+    def get_filters(self, monitors, day, filter_priority=FILTER_PRIORITY2):
         filters = []
-        for ms in ms_list:
+        for monitors in monitors:
             for filter_enum in self.filters:
                 if filter_enum.priority <= filter_priority:
-                    filters.extend(filter_enum.get_filters(ms, day))
+                    filters.extend(filter_enum.get_filters(monitors, day))
         return filters
 
 
@@ -83,44 +84,44 @@ __MONITOR_FILTERS = {}
 
 
 def filter_remote_2days_in_a_row(
-        ms_list: list, day: datetime, must_work_at_office_groups: list):
+        monitors: list, day: datetime, must_work_at_office_groups: list):
     pre_day = day - timedelta(days=1)
     next_day = day + timedelta(days=1)
     filters = []
-    for ms in ms_list:
-        if ms.schedule.get(pre_day) == ERole.R or ms.schedule.get(next_day) == ERole.R:
-            filters.append(_get_and_set_if_absent_monitor_filter(ms.monitor, False))
+    for monitor in monitors:
+        if monitor.schedule.get(pre_day) == ERole.R or monitor.schedule.get(next_day) == ERole.R:
+            filters.append(_get_and_set_if_absent_monitor_name_filter(monitor.name, False))
     return filters
 
 
 def filter_must_work_at_office(
-        ms_list: list, day: datetime, must_work_at_office_groups: list):
+        monitors: list, day: datetime, must_work_at_office_groups: list):
     filters = []
-    not_office_monitors = {ms.monitor for ms in ms_list
-                           if ms.schedule.get(day) in NOT_AT_OFFICE_ROLES}
+    not_office_monitor_names = {monitor.name for monitor in monitors
+                                if monitor.schedule.get(day) in NOT_AT_OFFICE_ROLES}
     for must_work_at_office_group in must_work_at_office_groups:
-        if must_work_at_office_monitors := must_work_at_office_group - not_office_monitors:
+        if must_work_at_office_monitors := must_work_at_office_group - not_office_monitor_names:
             filters.append(_create_filter_func(must_work_at_office_monitors))
     return filters
 
 
 def _create_filter_func(must_work_at_office_monitors):
-    def func(monitor_set: set):
-        return not (monitor_set >= must_work_at_office_monitors)
+    def func(monitor_name_set: set):
+        return not (monitor_name_set >= must_work_at_office_monitors)
     return func
 
 
 def filter_remote_max(
-        ms_list: list, day: datetime, must_work_at_office_groups: list):
+        monitors: list, day: datetime, must_work_at_office_groups: list):
     filters = []
-    for ms in ms_list:
-        if ms.is_role_max(ERole.R):
-            filters.append(_get_and_set_if_absent_monitor_filter(ms.monitor, False))
+    for monitor in monitors:
+        if monitor.is_role_max(ERole.R):
+            filters.append(_get_and_set_if_absent_monitor_name_filter(monitor.name, False))
     return filters
 
 
-def _get_and_set_if_absent_monitor_filter(monitor, include):
-    key = (monitor, include)
+def _get_and_set_if_absent_monitor_name_filter(monitor_name: str, include: bool):
+    key = (monitor_name, include)
     monitor_filter = __MONITOR_FILTERS.get(key)
     if not monitor_filter:
         monitor_filter = _create_monitor_filter(*key)
@@ -128,11 +129,11 @@ def _get_and_set_if_absent_monitor_filter(monitor, include):
     return monitor_filter
 
 
-def _create_monitor_filter(monitor, include):
+def _create_monitor_filter(monitor_name: str, include: bool):
     if include:
-        return lambda monitor_set: monitor in monitor_set
+        return lambda monitor_name_set: monitor_name in monitor_name_set
     else:
-        return lambda monitor_set: monitor not in monitor_set
+        return lambda monitor_name_set: monitor_name not in monitor_name_set
 
 
 class ERemoteFilters(Enum):
@@ -140,16 +141,16 @@ class ERemoteFilters(Enum):
     MUST_WORK_AT_OFFICE_GROUP = (FILTER_PRIORITY1, filter_must_work_at_office)
     REMOTE_MAX = (FILTER_PRIORITY1, filter_remote_max)
 
-    def __init__(self, priority, filter_func):
-        self.__priority = priority
+    def __init__(self, priority: int, filter_func):
+        self.__priority: int = priority
         self.__filter_func = filter_func
 
     @property
-    def priority(self):
+    def priority(self) -> int:
         return self.__priority
 
-    def get_filters(self, ms_list: list, day: datetime, must_work_at_office_groups: list):
-        return self.__filter_func(ms_list, day, must_work_at_office_groups)
+    def get_filters(self, monitors: list, day: datetime, must_work_at_office_groups: list):
+        return self.__filter_func(monitors, day, must_work_at_office_groups)
 
     def __repr__(self):
         return f'({self.__priority}, {self.name})'
@@ -157,71 +158,78 @@ class ERemoteFilters(Enum):
 
 # Filters for MonitorCombo
 
-def filter_manual_input(ms: MonitorSchedule, day: datetime):
+def filter_manual_input(monitor: Monitor, day: datetime):
     filters = []
     # Manually input day role
-    if role := ms.schedule.get(day):
+    if role := monitor.schedule.get(day):
         if role in MONITOR_ROLES_ALL:
-            filters.append(_create_monitor_combo_filter(ms.monitor, roles=[role]))
+            filters.append(_create_monitor_combo_filter(monitor.name, roles=[role]))
         elif role == ERole.OTHER:
-            filters.append(_create_monitor_combo_filter(ms.monitor, include=False))
+            filters.append(_create_monitor_combo_filter(monitor.name, include=False))
     return filters
 
 
-def filter_monitoring_max(ms: MonitorSchedule, day: datetime):
+def filter_monitoring_max(monitor: Monitor, day: datetime):
     filters = []
     filter_roles = []
-    if ms.is_role_max(ERole.AM1):
+    if monitor.is_role_max(ERole.AM1):
         filter_roles.append(ERole.AM1)
-    if ms.is_role_max(ERole.AM2):
+    if monitor.is_role_max(ERole.AM2):
         filter_roles.append(ERole.AM2)
-    if ms.is_role_max(ERole.PM):
+    if monitor.is_role_max(ERole.PM):
         filter_roles.append(ERole.PM)
     if filter_roles:
         filters.append(
-            _create_monitor_combo_filter(ms.monitor, include=False, roles=filter_roles))
+            _create_monitor_combo_filter(monitor.name, include=False, roles=filter_roles))
     return filters
 
 
-def filter_am_am_in_a_row(ms: MonitorSchedule, day: datetime):
+def filter_am_am_in_a_row(monitor: Monitor, day: datetime):
     filters = []
     pre_day = day - timedelta(days=1)
     next_day = day + timedelta(days=1)
-    if (ms.schedule.get(pre_day) in MONITOR_ROLES_AM or
-            ms.schedule.get(next_day) in MONITOR_ROLES_AM):
+    if (monitor.schedule.get(pre_day) in MONITOR_ROLES_AM or
+            monitor.schedule.get(next_day) in MONITOR_ROLES_AM):
         filters.append(_create_monitor_combo_filter(
-            ms.monitor, include=False, roles=MONITOR_ROLES_AM))
+            monitor.name, include=False, roles=MONITOR_ROLES_AM))
     return filters
 
 
-def filter_pm_am_in_a_row(ms: MonitorSchedule, day: datetime):
+def filter_pm_am_in_a_row(monitor: Monitor, day: datetime):
     filters = []
     pre_day = day - timedelta(days=1)
     next_day = day + timedelta(days=1)
-    if ms.schedule.get(pre_day) == ERole.PM:
+    if monitor.schedule.get(pre_day) == ERole.PM:
         filters.append(_create_monitor_combo_filter(
-            ms.monitor, include=False, roles=MONITOR_ROLES_AM))
-    if ms.schedule.get(next_day) == ERole.PM:
+            monitor.name, include=False, roles=MONITOR_ROLES_AM))
+    if monitor.schedule.get(next_day) == ERole.PM:
         filters.append(_create_monitor_combo_filter(
-            ms.monitor, include=False, roles=[ERole.PM]))
+            monitor.name, include=False, roles=[ERole.PM]))
     return filters
 
 
-def filter_pm_pm_in_a_row(ms: MonitorSchedule, day: datetime):
+def filter_pm_pm_in_a_row(monitor: Monitor, day: datetime):
     filters = []
     pre_day = day - timedelta(days=1)
     next_day = day + timedelta(days=1)
-    if ms.schedule.get(pre_day) == ERole.PM or ms.schedule.get(next_day) == ERole.PM:
+    if monitor.schedule.get(pre_day) == ERole.PM or monitor.schedule.get(next_day) == ERole.PM:
         filters.append(_create_monitor_combo_filter(
-            ms.monitor, include=False, roles=[ERole.PM]))
+            monitor.name, include=False, roles=[ERole.PM]))
     return filters
 
 
-def _create_monitor_combo_filter(monitor, include=True, roles=None):
-    if include:
-        return lambda monitor_combo: monitor_combo.contains_monitor(monitor, roles)
-    else:
-        return lambda monitor_combo: not monitor_combo.contains_monitor(monitor, roles)
+def _create_monitor_combo_filter(monitor_name: str, include: bool = True, roles=None):
+    def filter_func(monitor_combo: dict) -> bool:
+        is_include = False
+        if roles:
+            for role, name in monitor_combo.items():
+                if role in roles and name == monitor_name:
+                    is_include = True
+        else:
+            is_include = monitor_name in monitor_combo.values()
+        return is_include if include else not is_include
+
+    return filter_func
 
 
 class EMonitorComboFilters(Enum):
@@ -239,8 +247,8 @@ class EMonitorComboFilters(Enum):
     def priority(self):
         return self.__priority
 
-    def get_filters(self, ms: MonitorSchedule, day: datetime):
-        return self.__filter_func(ms, day)
+    def get_filters(self, monitor: Monitor, day: datetime):
+        return self.__filter_func(monitor, day)
 
     def __repr__(self):
         return f'({self.__priority}, {self.name})'
