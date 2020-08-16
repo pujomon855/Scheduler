@@ -63,7 +63,8 @@ class Monitor:
         :param role: 役割
         :return: この監視者に割り当てられた役割の日数が設定された上限値に達している場合はTrue
         """
-        if max_count := self.role_max.get(role):
+        max_count = self.role_max.get(role)
+        if max_count:
             return len([r for r in self.schedule.values() if r == role]) >= max_count
         return False
 
@@ -102,13 +103,15 @@ def load_monitors_info(wb: Workbook, **config):
 
     for row_idx in range(data_start_row_idx, ws.max_row + 1):
         # Monitors
-        if name := ws.cell(row_idx, monitor_col_idx + EMonitorsColIdx.MONITOR_NAME).value:
+        name = ws.cell(row_idx, monitor_col_idx + EMonitorsColIdx.MONITOR_NAME).value
+        if name:
             fix_specialist_val = ws.cell(
                 row_idx, monitor_col_idx + EMonitorsColIdx.FIX_SPECIALIST).value
             monitor_dict[name] = Monitor(name, fix_specialist_val == 1)
 
         # Groups
-        if name1 := ws.cell(row_idx, combo_col_idx + EComboColIdx.COMBO_MEMBER1).value:
+        name1 = ws.cell(row_idx, combo_col_idx + EComboColIdx.COMBO_MEMBER1).value
+        if name1:
             name2 = ws.cell(row_idx, combo_col_idx + EComboColIdx.COMBO_MEMBER2).value
             must_work_at_office_groups.append({name1, name2})
     return monitor_dict, must_work_at_office_groups
@@ -199,7 +202,8 @@ def assign_remote_max(monitor_dict: dict, days: int, max_num_of_remotes_per_day:
     manual_remote_max = 0
     not_work_at_office_days = 0
     for monitor in monitor_dict.values():
-        if remote_max := monitor.role_max.get(ERole.R):
+        remote_max = monitor.role_max.get(ERole.R)
+        if remote_max:
             manually_assigned_monitors.append(monitor)
             manual_remote_max += remote_max
         else:

@@ -100,7 +100,8 @@ def filter_must_work_at_office(
     not_office_monitor_names = {monitor.name for monitor in monitors
                                 if monitor.schedule.get(day) in NOT_AT_OFFICE_ROLES}
     for must_work_at_office_group in must_work_at_office_groups:
-        if must_work_at_office_monitors := must_work_at_office_group - not_office_monitor_names:
+        must_work_at_office_monitors = must_work_at_office_group - not_office_monitor_names
+        if must_work_at_office_monitors:
             filters.append(_create_filter_func(must_work_at_office_monitors))
     return filters
 
@@ -161,7 +162,8 @@ class ERemoteFilters(Enum):
 def filter_manual_input(monitor: Monitor, day: datetime):
     filters = []
     # Manually input day role
-    if role := monitor.schedule.get(day):
+    role = monitor.schedule.get(day)
+    if role:
         if role in MONITOR_ROLES_ALL:
             filters.append(_create_monitor_combo_filter(monitor.name, roles=[role]))
         elif role == ERole.OTHER:

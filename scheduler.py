@@ -81,7 +81,8 @@ def load_initial_schedules(ws: Worksheet, monitor_dict: dict):
             continue
         weekday_dict[row_idx] = day
         for idx, monitor in enumerate(monitor_dict.values(), 1):
-            if val := row[idx].value:
+            val = row[idx].value
+            if val:
                 role = convert_val_to_role(val)
                 monitor.schedule[day] = role
     return monitor_column_dict, weekday_dict
@@ -159,7 +160,8 @@ def _create_weekday_sort_func(monitors):
     def weekday_sort_func(weekday: datetime):
         priority = 0
         for monitor in monitors:
-            if role := monitor.schedule.get(weekday):
+            role = monitor.schedule.get(weekday)
+            if role:
                 if role in MONITOR_ROLES_ALL:
                     priority -= 2
                 else:
@@ -188,9 +190,9 @@ def copy_to_original_monitor_dict(cp_monitor_dict: dict, org_monitor_dict: dict)
 def _try_assign_monitors(monitor_dict, all_monitor_combo, weekdays, fm, try_cnt, filter_priority):
     for i in range(try_cnt):
         if _assign_monitors(monitor_dict, all_monitor_combo, weekdays, fm, filter_priority):
-            print(f'MONITOR: {filter_priority=}: {i + 1}: found.')
+            print(f'MONITOR: filter_priority={filter_priority}: {i + 1}: found.')
             return True
-    print(f'MONITOR: {filter_priority=}: {try_cnt}: not found.')
+    print(f'MONITOR: filter_priority={filter_priority}: {try_cnt}: not found.')
     return False
 
 
@@ -239,7 +241,8 @@ def load_manual_remote_max(ws: Worksheet, monitor_dict: dict, monitor_column_dic
     :return: None
     """
     for monitor in monitor_dict.values():
-        if remote_max := ws.cell(row=REMOTE_MAX_ROW_IDX, column=monitor_column_dict[monitor.name]).value:
+        remote_max = ws.cell(row=REMOTE_MAX_ROW_IDX, column=monitor_column_dict[monitor.name]).value
+        if remote_max:
             monitor.role_max[ERole.R] = remote_max
 
 
@@ -297,12 +300,13 @@ def assign_remotes(monitor_dict: dict, weekdays, filter_manager: RemoteFilterMan
             monitor_dict, weekdays, filter_manager,
             max_num_of_remotes_per_day, FILTER_PRIORITY1, force_exec=True)
         if num_of_unassigned_days == 0:
-            print(f'REMOTE2: {FILTER_PRIORITY1=}: {i + 1}: found.')
+            print(f'REMOTE2: filter_priority={FILTER_PRIORITY1}: {i + 1}: found.')
             return cp_md, 0
         if num_of_unassigned_days < min_num_of_unassigned_days:
             min_num_of_unassigned_days = num_of_unassigned_days
             tmp_md = cp_md
-    print(f'Not found. {max_num_of_remotes_per_day=}. {min_num_of_unassigned_days=}')
+    print(f'Not found. max_num_of_remotes_per_day={max_num_of_remotes_per_day}.'
+          f' min_num_of_unassigned_days={min_num_of_unassigned_days}')
     return tmp_md, min_num_of_unassigned_days
 
 
@@ -324,10 +328,12 @@ def _try_assign_remotes(monitor_dict: dict, weekdays, fm: RemoteFilterManager,
         cp_md, num_of_unassigned_days = _assign_remotes(
             monitor_dict, weekdays, fm, max_num_of_remotes_per_day, filter_priority)
         if num_of_unassigned_days == 0:
-            print(f'REMOTE: {filter_priority=}, {max_num_of_remotes_per_day=}: {i + 1}: found.')
+            print(f'REMOTE: filter_priority={filter_priority}, '
+                  f'max_num_of_remotes_per_day={max_num_of_remotes_per_day}: {i + 1}: found.')
             return cp_md
     raise ComboNotFoundException(f'Remote combo not found. '
-                                 f'{filter_priority=}, {max_num_of_remotes_per_day=}: {try_cnt}')
+                                 f'filter_priority={filter_priority}, '
+                                 f'max_num_of_remotes_per_day={max_num_of_remotes_per_day}: {try_cnt}')
 
 
 def _assign_remotes(monitor_dict: dict, weekdays, fm: RemoteFilterManager,
@@ -380,7 +386,8 @@ def _assign_remotes(monitor_dict: dict, weekdays, fm: RemoteFilterManager,
             cp_md[monitor_name].schedule[day] = ERole.R
         num_of_assigned_days += 1
 
-    if num_of_unassigned_days := (len(weekdays) - num_of_assigned_days):
+    num_of_unassigned_days = len(weekdays) - num_of_assigned_days
+    if num_of_unassigned_days:
         return cp_md, num_of_unassigned_days
     return cp_md, 0
 
@@ -402,9 +409,11 @@ def output_schedules(ws: Worksheet, monitor_dict: dict, weekday_dict: dict,
     }
     for row_idx, weekday in weekday_dict.items():
         for monitor in monitor_dict.values():
-            if (role := monitor.schedule.get(weekday)) and role in OUTPUT_ROLES:
+            role = monitor.schedule.get(weekday)
+            if role in OUTPUT_ROLES:
                 ws.cell(row=row_idx, column=monitor_column_dict[monitor.name], value=role.name)
-                if col_idx := monitor_name_cols.get(role):
+                col_idx = monitor_name_cols.get(role)
+                if col_idx:
                     ws.cell(row=row_idx, column=col_idx, value=monitor.name)
 
 
@@ -435,7 +444,8 @@ def debug_schedules(monitor_dict: dict, weekdays):
         normals = []
         remotes = []
         for monitor in monitor_dict.values():
-            if (role := monitor.schedule.get(day)) in print_roles:
+            role = monitor.schedule.get(day)
+            if role in print_roles:
                 if role == ERole.R:
                     remotes.append(monitor.name)
                 elif role == ERole.N:

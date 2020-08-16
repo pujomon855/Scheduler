@@ -5,3 +5,4 @@ schedules/MonitorSchedule2020_*
 build
 dist
 scheduler.spec
+venv37
